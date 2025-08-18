@@ -1,0 +1,12 @@
+{
+  "name": "structure-algoritms",
+  "version": "1.0.0",
+  "description": "",
+  "main": "hash-table.js",
+  "scripts": {
+    "start": "node hash-table.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,9 @@
+POST http://localhost:8080/login
+Content-Type: application/json
+Authorization: 2439583495839048509348598.234kj342k534k5j34k5j3k45jf.23k5j3ltjo5jtnerkgjerjgkng
+
+{
+    "email": "test2@example.com",
+    "password": "test"
+}
+
