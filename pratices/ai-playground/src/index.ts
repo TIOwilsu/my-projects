@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import "dotenv/config";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { tools } from "./toolRegistry";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,32 +13,129 @@ const rl = readline.createInterface({
   output,
 });
 
+const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+  {
+    role: "system",
+    content: `
+      Você é um assistente técnico da empresa.
+      Você pode consultar tickets do Jira.
+  `,
+  },
+];
+
 async function main() {
-  const question = await rl.question("Pergunte algo: ");
+  while (true) {
+    const question = await rl.question("\nVocê: ");
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
-    messages: [
-      {
-        role: "system",
-        content: "Você é um assistente técnico útil.",
-      },
-      {
-        role: "user",
-        content: question,
-      },
-    ],
-  });
+    if (question.toLowerCase() === "sair") {
+      break;
+    }
 
-  console.log("\nIA:\n");
+    messages.push({
+      role: "user",
+      content: question,
+    });
 
-  if(!response?.choices[0]) {
-    console.log("Não foi possível obter uma resposta da IA.");
-    rl.close();
-    return;
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages,
+      tools: Object.values(tools).map((tool) => tool.definition),
+    });
+
+    if(!response?.choices[0]) {
+      console.log("Não foi possível obter uma resposta da IA.");
+      rl.close();
+      return;
+    }
+
+    const message = response.choices[0].message;
+
+    // VERIFICA SE A IA QUER CHAMAR TOOL
+    if (message.tool_calls) {
+      messages.push({
+        role: "assistant",
+        content: message.content || "",
+        tool_calls: message.tool_calls,
+      });
+      
+      for (const toolCall of message.tool_calls) {
+        if (toolCall?.type !== "function") {
+          continue;
+        }
+
+        const toolName = toolCall.function.name;
+
+        const tool = tools[
+          toolName as keyof typeof tools
+        ];
+
+        if (!tool) {
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({
+              error: "Tool não encontrada",
+            }),
+          });
+
+          continue;
+        }
+
+        const rawArgs = JSON.parse(toolCall.function.arguments);
+
+        const args = tool.schema.parse(rawArgs);
+
+        try {
+          const result = await tool.execute(args);
+
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          });
+        } catch (error) {
+          console.error(error);
+
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({
+              error: "Erro ao executar tool",
+            }),
+          });
+        }
+
+        // SEGUNDA CHAMADA PARA IA RESPONDER
+        const secondResponse = await openai.chat.completions.create({
+          model: "gpt-4.1-mini",
+          messages,
+        });
+
+        if(!secondResponse?.choices[0]) {
+          console.log("Não foi possível obter uma resposta da IA.");
+          rl.close();
+          return;
+        }
+
+        const finalAnswer =
+          secondResponse.choices[0].message.content;
+
+        console.log("\nIA:\n");
+
+        console.log(finalAnswer);
+
+      }
+    } else {
+      console.log("\nIA:\n");
+
+      console.log(message.content);
+
+      messages.push({
+        role: "assistant",
+        content: message.content || "",
+      });
+    }
   }
-
-  console.log(response.choices[0].message.content);
 
   rl.close();
 }
